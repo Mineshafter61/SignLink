@@ -11,9 +11,7 @@ import org.bukkit.block.Sign;
 import org.bukkit.entity.Player;
 
 import com.bergerkiller.bukkit.common.BlockLocation;
-import com.bergerkiller.bukkit.common.nbt.CommonTagCompound;
 import com.bergerkiller.bukkit.common.protocol.CommonPacket;
-import com.bergerkiller.bukkit.common.protocol.PacketType;
 import com.bergerkiller.bukkit.common.utils.BlockUtil;
 import com.bergerkiller.bukkit.common.utils.EntityUtil;
 import com.bergerkiller.bukkit.common.utils.LogicUtil;
@@ -21,7 +19,6 @@ import com.bergerkiller.bukkit.common.utils.MaterialUtil;
 import com.bergerkiller.bukkit.common.utils.PacketUtil;
 import com.bergerkiller.bukkit.common.utils.PlayerUtil;
 import com.bergerkiller.bukkit.common.utils.WorldUtil;
-import com.bergerkiller.bukkit.common.wrappers.ChatText;
 import com.bergerkiller.bukkit.sl.API.Variables;
 
 /**
@@ -91,7 +88,7 @@ public class VirtualSign extends VirtualSignStore {
         remove(this.location);
     }
 
-    public void resetLines() {
+    public synchronized void resetLines() {
         this.playerlines.clear();
     }
 
@@ -99,7 +96,7 @@ public class VirtualSign extends VirtualSignStore {
         resetLines(player.getName().toLowerCase());
     }
 
-    public void resetLines(String playerName) {
+    public synchronized void resetLines(String playerName) {
         this.playerlines.remove(playerName);
     }
 
@@ -118,7 +115,7 @@ public class VirtualSign extends VirtualSignStore {
      *                   Specifying null will return the default lines.
      * @return lines for this player
      */
-    public VirtualLines getLines(String playerName) {
+    public synchronized VirtualLines getLines(String playerName) {
         if (playerName == null) {
             return getLines();
         }
@@ -159,7 +156,7 @@ public class VirtualSign extends VirtualSignStore {
      * @param value Value to store on the line
      * @param forPlayerFilter Filters what players should be updated
      */
-    public void setLine(int index, String value, VariableTextPlayerFilter forPlayerFilter) {
+    public synchronized void setLine(int index, String value, VariableTextPlayerFilter forPlayerFilter) {
 //        System.out.println("Set line "+index+" to "+value+" for "+(players==null?null:players.length));
         if (forPlayerFilter.isAll()) {
             //Set all lines to this value at this index
@@ -221,7 +218,7 @@ public class VirtualSign extends VirtualSignStore {
      * @param player Name of the player to get it for, all-lowercase
      * @return Line for this player
      */
-    public String getLine(int index, String player) {
+    public synchronized String getLine(int index, String player) {
         return this.playerlines.getOrDefault(player, this.defaultlines).get(index);
     }
 
@@ -302,52 +299,6 @@ public class VirtualSign extends VirtualSignStore {
      */
     public BlockLocation getPosition() {
         return this.location;
-    }
-
-    /**
-     * Updates the sign contents to the update packet belonging to this sign
-     * 
-     * @param viewer of this sign
-     * @param updatePacket for this sign
-     */
-    public void applyToPacket(Player viewer, CommonPacket updatePacket) {
-        applyToPacket(getLines(viewer), updatePacket);
-    }
-
-    /**
-     * Updates the sign contents to the update packet belonging to this sign
-     * 
-     * @param virtual line information to apply
-     * @param updatePacket for this sign
-     */
-    public void applyToPacket(VirtualLines lines, CommonPacket updatePacket) {
-        if (updatePacket.getType() == PacketType.OUT_TILE_ENTITY_DATA) {
-            // >= MC 1.10.2
-            
-            CommonTagCompound compound = updatePacket.read(PacketType.OUT_TILE_ENTITY_DATA.data);
-            // ====================================================================
-
-            for (int i = 0; i < VirtualLines.LINE_COUNT; i++) {
-                //String old_text = compound.getValue(key, "");
-                //System.out.println("Ln[" + i + "] = " + old_text);
-                //System.out.println("Tn[" + i + "] = " + Conversion.chatJsonToText.convert(old_text));
-
-                String key = "Text" + (i+1);
-                String text = ChatText.fromMessage(lines.get(i)).getJson();
-                compound.putValue(key, text);
-            }
-
-            // ====================================================================
-            updatePacket.write(PacketType.OUT_TILE_ENTITY_DATA.data, compound);
-        } else if (updatePacket.getType() == PacketType.OUT_UPDATE_SIGN) {
-            // <= MC 1.8.8
-
-            ChatText[] pkt_lines = updatePacket.read(PacketType.OUT_UPDATE_SIGN.lines);
-            for (int i = 0; i < VirtualLines.LINE_COUNT; i++) {
-                pkt_lines[i] = ChatText.fromMessage(lines.get(i));
-            }
-            updatePacket.write(PacketType.OUT_UPDATE_SIGN.lines, pkt_lines);
-        }
     }
 
     /**
@@ -543,13 +494,9 @@ public class VirtualSign extends VirtualSignStore {
         if (SignLink.updateSigns && player != null) {
             CommonPacket updatePacket = BlockUtil.getUpdatePacket(sign);
             if (updatePacket != null) {
-                applyToPacket(lines, updatePacket);
-
-                SLListener.ignore = true;
-                PacketUtil.sendPacket(player, updatePacket);
-                SLListener.ignore = false;
+                SLBlockStateChangeListener.applyDirect(this, player, updatePacket);
+                PacketUtil.sendPacket(player, updatePacket, false); // Send and skip listeners
             }
         }
     }
-
 }
